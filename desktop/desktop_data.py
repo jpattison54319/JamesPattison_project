@@ -19,6 +19,7 @@ class DashboardData:
 
     @classmethod
     def load(cls, db_path: Path) -> "DashboardData":
+        """Loads the coaching data needed by the dashboard. Returns a DashboardData object."""
         recommendations = insights.coach_recommendations(str(db_path))
         recovery = insights.recovery_summary(str(db_path))
 

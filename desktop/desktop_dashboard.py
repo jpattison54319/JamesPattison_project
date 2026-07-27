@@ -31,6 +31,7 @@ class DashboardView(ctk.CTkFrame):
         on_import_requested: Callable[[], None],
         on_data_loaded: Callable[[DashboardData], None],
     ):
+        """Builds the dashboard shell and loads the first data snapshot. Returns None."""
         super().__init__(master, fg_color="transparent")
         self.db_path = Path(db_path)
         self.on_import_requested = on_import_requested
@@ -40,9 +41,10 @@ class DashboardView(ctk.CTkFrame):
 
         self._build_shell()
         self.bind("<Configure>", self._window_changed)
-        self.refresh()
+        self.after_idle(self.refresh)
 
     def _build_shell(self):
+        """Builds the dashboard header, buttons, status line, and card grid. Returns None."""
         self.grid_rowconfigure(2, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
@@ -119,7 +121,12 @@ class DashboardView(ctk.CTkFrame):
         self.status_label.grid(row=3, column=0, sticky="ew", pady=(10, 0))
 
     def _window_changed(self, event):
-        if event.widget is not self or event.width <= 0 or not hasattr(self, "card_grid"):
+        """Adjusts the card layout when the dashboard width changes. Returns None."""
+        if (
+            event.widget is not self
+            or event.width <= 0
+            or not hasattr(self, "card_grid")
+        ):
             return
         columns = 3 if event.width >= 900 else 2
         if columns != self.card_columns:
@@ -127,6 +134,7 @@ class DashboardView(ctk.CTkFrame):
             self._arrange_cards()
 
     def _arrange_cards(self):
+        """Places the cards into the current one-, two-, or three-column layout. Returns None."""
         if not self.card_columns:
             self.card_columns = 3 if self.winfo_width() >= 900 else 2
 
@@ -164,23 +172,24 @@ class DashboardView(ctk.CTkFrame):
             self.card_grid.grid_columnconfigure(column, weight=1)
 
     def _clear_card_grid(self):
+        """Removes the current dashboard cards and resets the layout state. Returns None."""
         for child in self.card_grid.winfo_children():
             child.destroy()
         self.cards = []
         self.card_columns = 0
 
     def refresh(self):
+        """Reloads dashboard data and rebuilds the cards, showing an error when needed. Returns None."""
         self.refresh_button.configure(state="disabled", text="Loading...")
         self.status_label.configure(text="Refreshing dashboard...")
         self.update_idletasks()
         try:
             data = DashboardData.load(self.db_path)
             if not data.database:
-                self._show_load_error(
-                    RuntimeError(
-                        "No imported workouts were found. Use Import new data "
-                        "to add an export pair."
-                    )
+                self._show_empty_dashboard()
+                self.on_data_loaded(data)
+                self.set_status(
+                    "Upload an Apple Health XML and Hevy CSV to get started."
                 )
                 return
 
@@ -194,9 +203,11 @@ class DashboardView(ctk.CTkFrame):
             self.refresh_button.configure(state="normal", text="Refresh")
 
     def set_status(self, message: str):
+        """Updates the small status message under the card grid. Returns None."""
         self.status_label.configure(text=message)
 
     def _render_cards(self, data: DashboardData):
+        """Builds the cards from one dashboard data snapshot and lays them out. Returns None."""
         self._clear_card_grid()
         self.cards = [
             self._monthly_status_card(data.recommendations),
@@ -208,6 +219,7 @@ class DashboardView(ctk.CTkFrame):
         self._arrange_cards()
 
     def _update_context(self, data: DashboardData):
+        """Updates the date-window label above the dashboard cards. Returns None."""
         latest = data.recommendations.get("latest_date")
         if latest:
             self.window_label.configure(
@@ -220,13 +232,51 @@ class DashboardView(ctk.CTkFrame):
             self.window_label.configure(text="No imported data yet")
 
     def _show_load_error(self, error: Exception):
+        """Replaces the card grid with a readable database-load error. Returns None."""
         self._clear_card_grid()
         error_card = DashboardCard(self.card_grid, "Dashboard unavailable")
         error_card.grid(row=0, column=0, columnspan=3, sticky="ew", padx=6, pady=6)
         error_card.show_empty(f"FitLens could not read the database.\n\n{error}")
         self.set_status("Refresh failed. Check the database and try again.")
 
+    def _show_empty_dashboard(self):
+        """Show the dashboard before the user has uploaded anything."""
+        self._clear_card_grid()
+        self.window_label.configure(text="No imported data yet")
+        card = DashboardCard(
+            self.card_grid,
+            "Your coaching dashboard is ready",
+            "Upload your first export pair to populate it.",
+        )
+        card.full_width = True
+        ctk.CTkLabel(
+            card.body,
+            text=(
+                "There is no data to show yet. Upload your Apple Health XML and "
+                "Hevy CSV, then FitLens will build your monthly coaching view."
+            ),
+            text_color=COLORS["muted"],
+            font=ctk.CTkFont(size=13),
+            justify="left",
+            anchor="w",
+            wraplength=620,
+        ).grid(row=0, column=0, sticky="w", pady=(4, 16))
+        ctk.CTkButton(
+            card.body,
+            text="Upload your data",
+            width=160,
+            height=38,
+            corner_radius=9,
+            fg_color=COLORS["accent_dark"],
+            hover_color="#28615C",
+            text_color=COLORS["text"],
+            command=self.on_import_requested,
+        ).grid(row=1, column=0, sticky="w")
+        self.cards = [card]
+        self._arrange_cards()
+
     def _monthly_status_card(self, data: dict) -> DashboardCard:
+        """Builds the readiness status card and its first explanation. Returns the DashboardCard."""
         card = DashboardCard(
             self.card_grid,
             "Monthly Coaching Status",
@@ -272,6 +322,7 @@ class DashboardView(ctk.CTkFrame):
         return card
 
     def _month_card(self, data: dict) -> DashboardCard:
+        """Builds the current-month training-load card. Returns the DashboardCard."""
         card = DashboardCard(
             self.card_grid,
             "This Month",
@@ -285,9 +336,17 @@ class DashboardView(ctk.CTkFrame):
 
         values = (
             ("Workouts", format_number(current.get("workouts")), "workouts"),
-            ("Strength sets", format_number(current.get("strength_sets")), "strength_sets"),
+            (
+                "Strength sets",
+                format_number(current.get("strength_sets")),
+                "strength_sets",
+            ),
             ("Volume", format_volume(current.get("volume_lbs")), "volume_lbs"),
-            ("Training time", format_minutes(current.get("duration_min")), "duration_min"),
+            (
+                "Training time",
+                format_minutes(current.get("duration_min")),
+                "duration_min",
+            ),
             ("Cardio", format_minutes(current.get("cardio_min")), "cardio_min"),
             ("Zone 2", format_minutes(current.get("zone2_min")), "zone2_min"),
         )
@@ -307,6 +366,7 @@ class DashboardView(ctk.CTkFrame):
         return card
 
     def _recovery_card(self, data: dict) -> DashboardCard:
+        """Builds the recovery snapshot card with sleep, HRV, and resting HR. Returns the DashboardCard."""
         card = DashboardCard(
             self.card_grid,
             "Recovery Snapshot",
@@ -327,7 +387,9 @@ class DashboardView(ctk.CTkFrame):
             ),
             (
                 "HRV",
-                format_number(metrics["HeartRateVariabilitySDNN"].get("avg_30"), 1, " ms"),
+                format_number(
+                    metrics["HeartRateVariabilitySDNN"].get("avg_30"), 1, " ms"
+                ),
                 metrics["HeartRateVariabilitySDNN"].get("change_30_pct"),
                 False,
             ),
@@ -344,6 +406,7 @@ class DashboardView(ctk.CTkFrame):
         return card
 
     def _recommendations_card(self, data: dict) -> DashboardCard:
+        """Builds the priority-actions card from the recommendation list. Returns the DashboardCard."""
         card = DashboardCard(
             self.card_grid,
             "Priority Actions",
@@ -399,6 +462,7 @@ class DashboardView(ctk.CTkFrame):
         return card
 
     def _plan_card(self, data: dict) -> DashboardCard:
+        """Builds the four-week plan card from the monthly plan. Returns the DashboardCard."""
         card = DashboardCard(
             self.card_grid,
             "Next 4 Weeks",
@@ -453,5 +517,6 @@ class DashboardView(ctk.CTkFrame):
 
     @staticmethod
     def _add_metric(parent, row, label, value, suffix=None, suffix_color=None):
+        """Adds one MetricRow to a card body. Returns None."""
         metric = MetricRow(parent, label, value, suffix, suffix_color)
         metric.grid(row=row, column=0, sticky="ew", pady=3)

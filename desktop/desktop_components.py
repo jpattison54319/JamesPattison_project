@@ -13,6 +13,7 @@ class DashboardCard(ctk.CTkFrame):
     """A rounded card with a heading and content body."""
 
     def __init__(self, master, title: str, subtitle: str | None = None):
+        """Builds the card shell, heading, and transparent body area. Returns None."""
         super().__init__(
             master,
             fg_color=COLORS["card"],
@@ -49,6 +50,7 @@ class DashboardCard(ctk.CTkFrame):
         self.body.grid_columnconfigure(0, weight=1)
 
     def show_empty(self, message: str):
+        """Puts a simple empty-state message in the card body. Returns None."""
         ctk.CTkLabel(
             self.body,
             text=message,
@@ -71,6 +73,7 @@ class MetricRow(ctk.CTkFrame):
         suffix: str | None = None,
         suffix_color: str | None = None,
     ):
+        """Builds one label/value row with an optional suffix marker. Returns None."""
         super().__init__(master, fg_color="transparent")
         self.grid_columnconfigure(0, weight=1)
 
@@ -104,19 +107,20 @@ class SmoothScrollableFrame(ctk.CTkScrollableFrame):
     """A scrollable frame that eases wheel movement instead of jumping. (Added smooth scrolling from my testing)"""
 
     def __init__(self, *args, **kwargs):
+        """Sets up the scroll targets before building the scrollable frame. Returns None."""
         self._smooth_target_x = None
         self._smooth_target_y = None
         self._smooth_job = None
         super().__init__(*args, **kwargs)
 
     def _mouse_wheel_all(self, event):
+        """Routes a wheel event into the smooth horizontal or vertical scroller. Returns None."""
         if not self._check_if_valid_scroll(event.widget):
             return
 
         direction = self._wheel_direction(event)
         if direction == 0:
             return
-
 
         canvas = self._parent_canvas
         if self._shift_pressed:
@@ -125,6 +129,7 @@ class SmoothScrollableFrame(ctk.CTkScrollableFrame):
             self._queue_scroll(canvas, "y", direction)
 
     def _wheel_direction(self, event) -> int:
+        """Normalizes platform-specific wheel events into a direction. Returns -1, 1, or 0."""
         if sys.platform.startswith("win") or sys.platform == "darwin":
             if not event.delta:
                 return 0
@@ -132,6 +137,7 @@ class SmoothScrollableFrame(ctk.CTkScrollableFrame):
         return -1 if event.num == 4 else 1
 
     def _queue_scroll(self, canvas, axis: str, direction: int):
+        """Moves the requested scroll axis toward a new target and starts the animation. Returns None."""
         if axis == "x":
             region = canvas.bbox("all")
             viewport = canvas.winfo_width()
@@ -151,9 +157,15 @@ class SmoothScrollableFrame(ctk.CTkScrollableFrame):
         if scrollable_size <= 0:
             return
 
-        current_offset = (target * scrollable_size) if target is not None else start * scrollable_size
+        current_offset = (
+            (target * scrollable_size)
+            if target is not None
+            else start * scrollable_size
+        )
         distance = 72 if sys.platform == "darwin" else 96
-        target_offset = max(0.0, min(scrollable_size, current_offset + direction * distance))
+        target_offset = max(
+            0.0, min(scrollable_size, current_offset + direction * distance)
+        )
         target_fraction = target_offset / scrollable_size
 
         if axis == "x":
@@ -165,6 +177,7 @@ class SmoothScrollableFrame(ctk.CTkScrollableFrame):
             self._smooth_job = self.after(8, self._animate_scroll)
 
     def _animate_scroll(self):
+        """Takes one eased step toward the pending scroll targets. Returns None."""
         canvas = self._parent_canvas
         region = canvas.bbox("all")
         if not region:
@@ -172,7 +185,10 @@ class SmoothScrollableFrame(ctk.CTkScrollableFrame):
             return
 
         finished = True
-        for axis, target in (("x", self._smooth_target_x), ("y", self._smooth_target_y)):
+        for axis, target in (
+            ("x", self._smooth_target_x),
+            ("y", self._smooth_target_y),
+        ):
             if target is None:
                 continue
 
@@ -206,6 +222,7 @@ class SmoothScrollableFrame(ctk.CTkScrollableFrame):
             self._smooth_job = self.after(8, self._animate_scroll)
 
     def destroy(self):
+        """Cancels any pending scroll animation before destroying the frame. Returns None."""
         if self._smooth_job is not None:
             self.after_cancel(self._smooth_job)
             self._smooth_job = None

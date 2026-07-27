@@ -7,19 +7,43 @@ from xml.etree import ElementTree as ET
 
 from common import sha1_id, short_metric
 
-INTRA_SUM = {"ActiveEnergyBurned", "BasalEnergyBurned",
-             "DistanceWalkingRunning", "StepCount"}
-INTRA_POINT = {"HeartRate", "RespiratoryRate", "PhysicalEffort",
-               "HeartRateVariabilitySDNN", "OxygenSaturation"}
+INTRA_SUM = {
+    "ActiveEnergyBurned",
+    "BasalEnergyBurned",
+    "DistanceWalkingRunning",
+    "StepCount",
+}
+INTRA_POINT = {
+    "HeartRate",
+    "RespiratoryRate",
+    "PhysicalEffort",
+    "HeartRateVariabilitySDNN",
+    "OxygenSaturation",
+}
 INTRA = INTRA_SUM | INTRA_POINT
 
-DAILY_SUM = {"ActiveEnergyBurned", "BasalEnergyBurned", "StepCount",
-             "DistanceWalkingRunning", "AppleExerciseTime", "AppleStandTime",
-             "FlightsClimbed"}
-DAILY_POINT = {"RestingHeartRate", "HeartRateVariabilitySDNN",
-               "WalkingHeartRateAverage", "VO2Max", "OxygenSaturation",
-               "RespiratoryRate", "BodyMass", "BodyFatPercentage",
-               "LeanBodyMass", "BloodPressureSystolic", "BloodPressureDiastolic"}
+DAILY_SUM = {
+    "ActiveEnergyBurned",
+    "BasalEnergyBurned",
+    "StepCount",
+    "DistanceWalkingRunning",
+    "AppleExerciseTime",
+    "AppleStandTime",
+    "FlightsClimbed",
+}
+DAILY_POINT = {
+    "RestingHeartRate",
+    "HeartRateVariabilitySDNN",
+    "WalkingHeartRateAverage",
+    "VO2Max",
+    "OxygenSaturation",
+    "RespiratoryRate",
+    "BodyMass",
+    "BodyFatPercentage",
+    "LeanBodyMass",
+    "BloodPressureSystolic",
+    "BloodPressureDiastolic",
+}
 DAILY = DAILY_SUM | DAILY_POINT
 
 SLEEP_TYPE = "SleepAnalysis"
@@ -30,9 +54,13 @@ NIGHT_GAP_SEC = 3 * 3600
 
 
 def parse_health_dt(s: str):
-    """Fast parse for Health timestamps."""
-    y = int(s[0:4]); mo = int(s[5:7]); d = int(s[8:10])
-    h = int(s[11:13]); mi = int(s[14:16]); se = int(s[17:19])
+    """Parses an Apple Health timestamp without the slower general date parser. Returns the UTC epoch and local date string."""
+    y = int(s[0:4])
+    mo = int(s[5:7])
+    d = int(s[8:10])
+    h = int(s[11:13])
+    mi = int(s[14:16])
+    se = int(s[17:19])
     off_min = int(s[21:23]) * 60 + int(s[23:25])
     if s[20] == "-":
         off_min = -off_min
@@ -53,6 +81,7 @@ class Stat:
     last_val: float | None = None
 
     def add(self, value: float, epoch: float, unit: str | None):
+        """Adds one sample to the running stats. Returns None."""
         self.count += 1
         self.total += value
         if value < self.vmin:
@@ -67,6 +96,7 @@ class Stat:
             self.unit = unit
 
     def as_row(self):
+        """Turns the running stats into the database row shape. Returns a summary dict."""
         return {
             "unit": self.unit,
             "sample_count": self.count,
@@ -91,17 +121,27 @@ class HealthResult:
 
 
 def _summarize_night(segments: list[tuple]) -> dict:
-    """Roll sleep segments into one night."""
-    mins = {"InBed": 0.0, "Awake": 0.0, "AsleepCore": 0.0, "AsleepDeep": 0.0,
-            "AsleepREM": 0.0, "AsleepUnspecified": 0.0}
+    """Rolls the sleep segments into one night and calculates efficiency. Returns one sleep summary dict."""
+    mins = {
+        "InBed": 0.0,
+        "Awake": 0.0,
+        "AsleepCore": 0.0,
+        "AsleepDeep": 0.0,
+        "AsleepREM": 0.0,
+        "AsleepUnspecified": 0.0,
+    }
     segments.sort(key=lambda x: x[0])
     start_local = segments[0][2]
     end_local = segments[-1][3]
     for s_ep, e_ep, _, _, stage in segments:
         dur = (e_ep - s_ep) / 60.0
         mins[stage] = mins.get(stage, 0.0) + dur
-    asleep = (mins["AsleepCore"] + mins["AsleepDeep"]
-              + mins["AsleepREM"] + mins["AsleepUnspecified"])
+    asleep = (
+        mins["AsleepCore"]
+        + mins["AsleepDeep"]
+        + mins["AsleepREM"]
+        + mins["AsleepUnspecified"]
+    )
     in_bed = mins["InBed"] if mins["InBed"] > 0 else (asleep + mins["Awake"])
     eff = (asleep / in_bed * 100.0) if in_bed > 0 else None
     return {
@@ -119,9 +159,10 @@ def _summarize_night(segments: list[tuple]) -> dict:
     }
 
 
-def stream_health(xml_path: str, floor_epoch: float, summary_windows: list[dict],
-                  progress=None) -> HealthResult:
-    """Parse the XML once and keep the summaries we need."""
+def stream_health(
+    xml_path: str, floor_epoch: float, summary_windows: list[dict], progress=None
+) -> HealthResult:
+    """Streams the XML once and keeps only the workout, daily, sleep, and Apple workout data we need. Returns a HealthResult."""
     # lookup for workout-window matches
     windows = sorted(summary_windows, key=lambda w: w["start_utc"])
     starts = [w["start_utc"] for w in windows]
@@ -150,8 +191,17 @@ def stream_health(xml_path: str, floor_epoch: float, summary_windows: list[dict]
             res.records_scanned += 1
             if progress is not None and res.records_scanned % 200000 == 0:
                 progress(res.records_scanned)
-            _handle_record(elem, floor_epoch, windows, starts, max_dur,
-                            workout_acc, daily_acc, sleep_segments, res)
+            _handle_record(
+                elem,
+                floor_epoch,
+                windows,
+                starts,
+                max_dur,
+                workout_acc,
+                daily_acc,
+                sleep_segments,
+                res,
+            )
         elif tag == "Workout":
             _handle_workout(elem, floor_epoch, res)
         elif tag == "Correlation":
@@ -191,8 +241,18 @@ def stream_health(xml_path: str, floor_epoch: float, summary_windows: list[dict]
     return res
 
 
-def _handle_record(elem, floor_epoch, windows, starts, max_dur,
-                   workout_acc, daily_acc, sleep_segments, res):
+def _handle_record(
+    elem,
+    floor_epoch,
+    windows,
+    starts,
+    max_dur,
+    workout_acc,
+    daily_acc,
+    sleep_segments,
+    res,
+):
+    """Filters and accumulates one Apple Health record. Returns None."""
     rtype = elem.get("type")
     start = elem.get("startDate")
     if not rtype or not start:
@@ -247,15 +307,15 @@ def _handle_record(elem, floor_epoch, windows, starts, max_dur,
 
 
 def short_metric_sleep(value: str | None) -> str:
-    """Shorten Apple sleep stage names."""
+    """Shortens an Apple sleep stage name by removing its long prefix. Returns the short stage name, or Unknown."""
     if not value:
         return "Unknown"
     prefix = "HKCategoryValueSleepAnalysis"
-    return value[len(prefix):] if value.startswith(prefix) else value
+    return value[len(prefix) :] if value.startswith(prefix) else value
 
 
 def _windows_containing(epoch, windows, starts, max_dur):
-    """Workout windows that contain this sample."""
+    """Finds the workout windows that contain one health sample. Returns an iterator of workout ids."""
     idx = bisect_right(starts, epoch) - 1
     floor = epoch - max_dur
     while idx >= 0:
@@ -268,6 +328,7 @@ def _windows_containing(epoch, windows, starts, max_dur):
 
 
 def _handle_workout(elem, floor_epoch, res):
+    """Reads one Apple workout and adds it to the result when it is in range. Returns None."""
     start = elem.get("startDate")
     end = elem.get("endDate")
     if not start or not end:
@@ -293,22 +354,25 @@ def _handle_workout(elem, floor_epoch, res):
         elif stype == "DistanceWalkingRunning" and distance is None:
             distance = _to_float(child.get("sum"))
 
-    res.apple_workouts.append({
-        "id": sha1_id(s_epoch, e_epoch, activity),
-        "activity_type": activity,
-        "start_local": start,
-        "end_local": end,
-        "start_utc": s_epoch,
-        "end_utc": e_epoch,
-        "duration_min": _to_float(elem.get("duration")),
-        "total_energy_cal": energy,
-        "total_distance": distance,
-        "avg_hr": avg_hr,
-        "max_hr": max_hr,
-    })
+    res.apple_workouts.append(
+        {
+            "id": sha1_id(s_epoch, e_epoch, activity),
+            "activity_type": activity,
+            "start_local": start,
+            "end_local": end,
+            "start_utc": s_epoch,
+            "end_utc": e_epoch,
+            "duration_min": _to_float(elem.get("duration")),
+            "total_energy_cal": energy,
+            "total_distance": distance,
+            "avg_hr": avg_hr,
+            "max_hr": max_hr,
+        }
+    )
 
 
 def _to_float(v):
+    """Turns an Apple Health attribute into a float when possible. Returns a float, or None for missing or invalid input."""
     if v is None:
         return None
     try:

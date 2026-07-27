@@ -1,10 +1,11 @@
-"""First-run import view for the FitLens desktop application."""
+"""Upload view for the FitLens desktop application."""
 
 from __future__ import annotations
 
 from pathlib import Path
 import queue
 import threading
+from datetime import date
 from tkinter import StringVar, filedialog
 from typing import Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -13,9 +14,8 @@ import customtkinter as ctk
 import engine
 
 from .desktop_components import DashboardCard
-from .desktop_formatting import detect_local_timezone
+from .desktop_formatting import detect_local_timezone, format_date
 from .desktop_theme import COLORS, LOOKBACK_CHOICES
-
 
 DOWNLOADS = Path.home() / "Downloads"
 
@@ -31,13 +31,20 @@ class OnboardingView(ctk.CTkFrame):
         existing_user: bool = False,
         default_timezone: str | None = None,
         on_cancel: Callable | None = None,
+        on_view_dashboard: Callable | None = None,
+        on_upload_again: Callable | None = None,
+        on_import_state_changed: Callable[[bool], None] | None = None,
     ):
+        """Builds the import view and stores the callbacks and import state. Returns None."""
         super().__init__(master, fg_color="transparent")
         self.db_path = Path(db_path)
         self.on_complete = on_complete
         self.existing_user = existing_user
         self.default_timezone = default_timezone
         self.on_cancel = on_cancel
+        self.on_view_dashboard = on_view_dashboard
+        self.on_upload_again = on_upload_again
+        self.on_import_state_changed = on_import_state_changed
         self.import_queue = queue.Queue()
         self.import_thread: threading.Thread | None = None
         self.controls: list = []
@@ -45,10 +52,11 @@ class OnboardingView(ctk.CTkFrame):
         self._build()
 
     def _build(self):
+        """Builds the import form, file controls, and status area. Returns None."""
         self.grid_rowconfigure(2, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        title = "Import new data" if self.existing_user else "Welcome to FitLens"
+        title = "Upload new data" if self.existing_user else "Upload your data"
         subtitle = (
             "Reconcile your latest exports with the existing FitLens database."
             if self.existing_user
@@ -69,7 +77,9 @@ class OnboardingView(ctk.CTkFrame):
             anchor="w",
         ).grid(row=1, column=0, sticky="w", pady=(5, 0))
 
-        card_title = "Add the latest exports" if self.existing_user else "Import your data"
+        card_title = (
+            "Add the latest exports" if self.existing_user else "Choose your exports"
+        )
         card_subtitle = (
             "FitLens will reconcile these files with the data already in your database."
             if self.existing_user
@@ -87,10 +97,10 @@ class OnboardingView(ctk.CTkFrame):
             card.body,
             text=(
                 "FitLens uses the existing import watermark to add only new records, "
-                "then returns you to the dashboard."
+                "then shows what date coverage was added."
                 if self.existing_user
                 else "FitLens reads the two exports on this computer, matches your "
-                "workouts with Apple Health metrics, and then opens the dashboard."
+                "workouts with Apple Health metrics, then lets you view the dashboard."
             ),
             text_color=COLORS["text"],
             font=ctk.CTkFont(size=13),
@@ -167,11 +177,7 @@ class OnboardingView(ctk.CTkFrame):
         actions.grid(row=button_row, column=0, sticky="w", pady=(4, 0))
         self.import_button = ctk.CTkButton(
             actions,
-            text=(
-                "Import new data and refresh dashboard"
-                if self.existing_user
-                else "Import data and open dashboard"
-            ),
+            text=("Upload new data" if self.existing_user else "Upload data"),
             height=40,
             width=250,
             corner_radius=9,
@@ -201,10 +207,12 @@ class OnboardingView(ctk.CTkFrame):
 
     @staticmethod
     def _default_export(filename: str) -> str:
+        """Suggests the normal Downloads location when the export is already there. Returns the path string, or an empty string."""
         path = DOWNLOADS / filename
         return str(path) if path.is_file() else ""
 
     def _file_picker_row(self, parent, row, label, variable, button_text, filetypes):
+        """Adds one labeled file field and browse button to the form. Returns None."""
         form_row = ctk.CTkFrame(parent, fg_color="transparent")
         form_row.grid(row=row, column=0, sticky="ew", pady=6)
         form_row.grid_columnconfigure(1, weight=1)
@@ -235,6 +243,7 @@ class OnboardingView(ctk.CTkFrame):
 
     @staticmethod
     def _form_row(parent, row, label, variable):
+        """Adds one labeled text field to the form. Returns the created entry widget."""
         form_row = ctk.CTkFrame(parent, fg_color="transparent")
         form_row.grid(row=row, column=0, sticky="ew", pady=6)
         form_row.grid_columnconfigure(1, weight=1)
@@ -257,11 +266,13 @@ class OnboardingView(ctk.CTkFrame):
 
     @staticmethod
     def _choose_file(variable, label, filetypes):
+        """Opens a file picker and writes the selected path into the variable. Returns None."""
         path = filedialog.askopenfilename(title=f"Choose {label}", filetypes=filetypes)
         if path:
             variable.set(path)
 
     def start_import(self):
+        """Validates the form and starts the import on a background thread. Returns None."""
         xml_path = Path(self.xml_path_var.get().strip().strip('"').strip("'"))
         csv_path = Path(self.csv_path_var.get().strip().strip('"').strip("'"))
         timezone = self.timezone_var.get().strip()
@@ -280,6 +291,8 @@ class OnboardingView(ctk.CTkFrame):
             return
 
         self._set_controls("disabled")
+        if self.on_import_state_changed:
+            self.on_import_state_changed(False)
         self.status_label.configure(
             text="Starting import... Apple Health exports can take a little while to scan.",
             text_color=COLORS["accent"],
@@ -293,6 +306,7 @@ class OnboardingView(ctk.CTkFrame):
         self.after(100, self._poll_import_queue)
 
     def _run_import(self, xml_path, csv_path, timezone, lookback_kind, lookback_value):
+        """Runs the engine import away from the UI thread and queues its result. Returns None."""
         kwargs = {"tz_name": timezone}
         if lookback_kind == "all":
             kwargs["all_history"] = True
@@ -312,6 +326,7 @@ class OnboardingView(ctk.CTkFrame):
             self.import_queue.put(("error", error))
 
     def _poll_import_queue(self):
+        """Checks for background import progress or completion and updates the UI. Returns None."""
         try:
             event, value = self.import_queue.get_nowait()
         except queue.Empty:
@@ -329,15 +344,117 @@ class OnboardingView(ctk.CTkFrame):
         if event == "error":
             self._set_error(f"The import could not finish:\n{value}")
             self._set_controls("normal")
+            if self.on_import_state_changed:
+                self.on_import_state_changed(True)
             self.import_thread = None
             return
 
         self.import_thread = None
+        if self.on_import_state_changed:
+            self.on_import_state_changed(True)
         self.on_complete(value)
+        self._show_completion(value)
+
+    def _show_completion(self, report):
+        """Replace the upload form with the result."""
+        for child in self.winfo_children():
+            child.destroy()
+
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            self,
+            text="Upload complete",
+            text_color=COLORS["text"],
+            font=ctk.CTkFont(size=29, weight="bold"),
+            anchor="w",
+        ).grid(row=0, column=0, sticky="w")
+        card = DashboardCard(self, "Your data is updated")
+        card.grid(row=1, column=0, sticky="nsew", pady=(22, 0))
+        card.body.grid_columnconfigure(0, weight=1)
+
+        summary = (
+            f"{report.new_workouts:,} workouts, {report.new_sets:,} sets, and "
+            f"{report.sleep_nights_written:,} sleep nights saved."
+        )
+        ctk.CTkLabel(
+            card.body,
+            text=summary,
+            text_color=COLORS["text"],
+            font=ctk.CTkFont(size=13),
+            justify="left",
+            anchor="w",
+            wraplength=680,
+        ).grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(
+            card.body,
+            text=self._coverage_summary(report),
+            text_color=COLORS["accent"],
+            font=ctk.CTkFont(size=13, weight="bold"),
+            justify="left",
+            anchor="w",
+            wraplength=680,
+        ).grid(row=1, column=0, sticky="w", pady=(12, 22))
+
+        actions = ctk.CTkFrame(card.body, fg_color="transparent")
+        actions.grid(row=2, column=0, sticky="w")
+        if self.on_view_dashboard:
+            ctk.CTkButton(
+                actions,
+                text="View dashboard",
+                height=40,
+                width=155,
+                corner_radius=9,
+                fg_color=COLORS["accent_dark"],
+                hover_color="#28615C",
+                text_color=COLORS["text"],
+                command=self.on_view_dashboard,
+            ).grid(row=0, column=0, sticky="w")
+        if self.on_upload_again:
+            ctk.CTkButton(
+                actions,
+                text="Upload another export",
+                height=40,
+                width=180,
+                corner_radius=9,
+                fg_color="transparent",
+                border_width=1,
+                border_color=COLORS["card_border"],
+                hover_color=COLORS["card_border"],
+                text_color=COLORS["muted"],
+                command=self.on_upload_again,
+            ).grid(row=0, column=1, sticky="w", padx=(10, 0))
+
+    @staticmethod
+    def _coverage_summary(report):
+        """Write a short summary of the dates this upload added."""
+        if not report.added_date_count:
+            return "No new calendar dates were added; existing dates were reconciled."
+
+        start = report.added_date_min
+        end = report.added_date_max
+        if start == end:
+            return f"New date added: {format_date(start)}."
+
+        start_date = date.fromisoformat(start)
+        end_date = date.fromisoformat(end)
+        months = (
+            (end_date.year - start_date.year) * 12
+            + end_date.month
+            - start_date.month
+            + 1
+        )
+        noun = "month" if months == 1 else "months"
+        return (
+            f"New coverage: {format_date(start)}–{format_date(end)} "
+            f"· {months} {noun} added."
+        )
 
     def _set_controls(self, state: str):
+        """Enables or disables all import controls together. Returns None."""
         for control in self.controls:
             control.configure(state=state)
 
     def _set_error(self, message: str):
+        """Shows an import error in the status area. Returns None."""
         self.status_label.configure(text=message, text_color=COLORS["red"])

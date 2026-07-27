@@ -1,6 +1,5 @@
 """Shared visual constants for the FitLens desktop application."""
 
-
 COLORS = {
     "background": "#101315",
     "sidebar": "#171B1E",
