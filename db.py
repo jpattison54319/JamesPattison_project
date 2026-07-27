@@ -103,7 +103,7 @@ CREATE INDEX IF NOT EXISTS idx_workouts_start ON workouts(start_utc);
 
 
 def connect(db_path: str) -> sqlite3.Connection:
-    """Open the DB and make sure the tables exist."""
+    """Opens the DB, applies the local SQLite settings, and makes sure the tables exist. Returns the open connection."""
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
@@ -115,13 +115,13 @@ def connect(db_path: str) -> sqlite3.Connection:
 
 
 def meta_get(conn: sqlite3.Connection, key: str, default=None):
-    row = conn.execute(
-        "SELECT value FROM import_meta WHERE key = ?", (key,)
-    ).fetchone()
+    """Reads one import metadata value. Returns the stored string, or the supplied default when it is missing."""
+    row = conn.execute("SELECT value FROM import_meta WHERE key = ?", (key,)).fetchone()
     return row["value"] if row else default
 
 
 def meta_set(conn: sqlite3.Connection, key: str, value) -> None:
+    """Stores one import metadata value as text. Returns None."""
     conn.execute(
         "INSERT OR REPLACE INTO import_meta(key, value) VALUES (?, ?)",
         (key, None if value is None else str(value)),
@@ -129,6 +129,7 @@ def meta_set(conn: sqlite3.Connection, key: str, value) -> None:
 
 
 def insert_workout(conn: sqlite3.Connection, w: dict) -> int:
+    """Adds a workout if it is not already in the database. Returns SQLite's affected-row count."""
     cur = conn.execute(
         """
         INSERT OR IGNORE INTO workouts
@@ -144,6 +145,7 @@ def insert_workout(conn: sqlite3.Connection, w: dict) -> int:
 
 
 def insert_set(conn: sqlite3.Connection, s: dict) -> int:
+    """Adds one workout set if it is not already there. Returns SQLite's affected-row count."""
     cur = conn.execute(
         """
         INSERT OR IGNORE INTO workout_sets
@@ -161,6 +163,7 @@ def insert_set(conn: sqlite3.Connection, s: dict) -> int:
 
 
 def upsert_workout_health_summary(conn: sqlite3.Connection, row: dict) -> None:
+    """Writes the health summary for one workout and metric. Returns None."""
     conn.execute(
         """
         INSERT OR REPLACE INTO workout_health_summary
@@ -175,6 +178,7 @@ def upsert_workout_health_summary(conn: sqlite3.Connection, row: dict) -> None:
 
 
 def upsert_daily_health(conn: sqlite3.Connection, row: dict) -> None:
+    """Writes one daily health metric row, replacing the old version if needed. Returns None."""
     conn.execute(
         """
         INSERT OR REPLACE INTO daily_health
@@ -188,6 +192,7 @@ def upsert_daily_health(conn: sqlite3.Connection, row: dict) -> None:
 
 
 def upsert_daily_sleep(conn: sqlite3.Connection, row: dict) -> None:
+    """Writes one night of sleep data, replacing the old version if needed. Returns None."""
     conn.execute(
         """
         INSERT OR REPLACE INTO daily_sleep
@@ -204,6 +209,7 @@ def upsert_daily_sleep(conn: sqlite3.Connection, row: dict) -> None:
 
 
 def insert_apple_workout(conn: sqlite3.Connection, row: dict) -> int:
+    """Adds an Apple workout if it is not already there. Returns SQLite's affected-row count."""
     cur = conn.execute(
         """
         INSERT OR IGNORE INTO apple_workouts

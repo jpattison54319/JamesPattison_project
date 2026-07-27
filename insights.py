@@ -1,6 +1,5 @@
 """Queries for the coach screens."""
 
-
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 
@@ -19,31 +18,57 @@ SUM_DAILY_METRICS = {
 
 ZONE2_TITLE_KEYWORDS = ("zone 2", "zone2", "easy", "base", "aerobic")
 HARD_CARDIO_TITLE_KEYWORDS = (
-    "hiit", "interval", "intervals", "4x4", "sprint", "threshold",
-    "tempo", "vo2", "zone 4", "zone4", "zone 5", "zone5",
+    "hiit",
+    "interval",
+    "intervals",
+    "4x4",
+    "sprint",
+    "threshold",
+    "tempo",
+    "vo2",
+    "zone 4",
+    "zone4",
+    "zone 5",
+    "zone5",
 )
 CARDIO_TITLE_KEYWORDS = (
-    "cardio", "run", "treadmill", "bike", "cycle", "cycling", "rower",
-    "elliptical", "walk", "stair", "hiit", "interval", "zone",
+    "cardio",
+    "run",
+    "treadmill",
+    "bike",
+    "cycle",
+    "cycling",
+    "rower",
+    "elliptical",
+    "walk",
+    "stair",
+    "hiit",
+    "interval",
+    "zone",
 )
 
 PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 
 
 def _local_date(value: str | None) -> date | None:
+    """Pulls the date part out of a stored date/time value. Returns a date, or None if there is no value."""
     if not value:
         return None
     return date.fromisoformat(value[:10])
 
 
 def _date_range(end: date | None, days: int) -> tuple[str | None, str | None]:
+    """Builds an inclusive window ending on the date we have. Returns ISO date strings, or (None, None) without an end date."""
     if end is None:
         return None, None
     start = end - timedelta(days=days - 1)
     return start.isoformat(), end.isoformat()
 
 
-def _previous_range(window: tuple[str | None, str | None]) -> tuple[str | None, str | None]:
+def _previous_range(
+    window: tuple[str | None, str | None],
+) -> tuple[str | None, str | None]:
+    """Moves a date window back by the same number of days. Returns the matching previous window, or (None, None) if it is incomplete."""
     if not window or not window[0] or not window[1]:
         return None, None
     start = date.fromisoformat(window[0])
@@ -53,29 +78,36 @@ def _previous_range(window: tuple[str | None, str | None]) -> tuple[str | None, 
 
 
 def _pct_change(current: float | None, baseline: float | None) -> float | None:
+    """Works out the percent change without dividing by missing or zero data. Returns the change, or None when it cannot be worked out."""
     if current is None or baseline in (None, 0):
         return None
     return (current - baseline) / baseline * 100.0
 
 
 def _safe_ratio(value: float | None, baseline: float | None) -> float | None:
+    """Gets one value as a ratio of another without throwing on missing data. Returns the ratio, or None when the baseline is unusable."""
     if value is None or baseline in (None, 0):
         return None
     return value / baseline
 
 
 def _avg(values: list[float]) -> float | None:
+    """Averages the values we actually have and skips missing ones. Returns the average, or None if the list is empty."""
     values = [v for v in values if v is not None]
     return sum(values) / len(values) if values else None
 
 
 def _daily_value_expr(metric: str) -> str:
+    """Picks the right daily health column order for this metric. Returns the SQL expression used in the daily average query."""
     if metric in SUM_DAILY_METRICS:
         return "COALESCE(sum, avg, last_value)"
     return "COALESCE(avg, last_value, sum)"
 
 
-def _daily_metric_avg(conn, metric: str, start: str | None, end: str | None) -> float | None:
+def _daily_metric_avg(
+    conn, metric: str, start: str | None, end: str | None
+) -> float | None:
+    """Gets the average value for one daily health metric in a date range. Returns a number, or None when there is no usable range or row."""
     if not start or not end:
         return None
     row = conn.execute(
@@ -90,6 +122,7 @@ def _daily_metric_avg(conn, metric: str, start: str | None, end: str | None) -> 
 
 
 def _sleep_avg(conn, field: str, start: str | None, end: str | None) -> float | None:
+    """Gets the average of one sleep field in a date range. Returns a number, or None when the range is missing or has no data."""
     if not start or not end:
         return None
     row = conn.execute(
@@ -100,6 +133,7 @@ def _sleep_avg(conn, field: str, start: str | None, end: str | None) -> float | 
 
 
 def _latest_data_date(conn) -> date | None:
+    """Finds the newest date across the health, sleep, and workout tables. Returns that date, or None when the database is empty."""
     candidates = []
     for table, col in (
         ("daily_health", "date"),
@@ -114,6 +148,7 @@ def _latest_data_date(conn) -> date | None:
 
 
 def _workout_totals(conn, start: str | None, end: str | None) -> dict:
+    """Rolls up workout count, time, sets, volume, and effort for a date range. Returns those totals in one dict, with zeros when the range is missing."""
     if not start or not end:
         return {
             "count": 0,
@@ -161,11 +196,18 @@ def _workout_totals(conn, start: str | None, end: str | None) -> dict:
 
 
 def _contains_any(text: str, needles: tuple[str, ...]) -> bool:
+    """Checks whether any of the supplied words show up in the text. Returns True when one matches, otherwise False."""
     return any(needle in text for needle in needles)
 
 
-def _cardio_zone(title: str | None, avg_hr: float | None, max_hr: float | None,
-                 effort: float | None, duration_min: float | None) -> str | None:
+def _cardio_zone(
+    title: str | None,
+    avg_hr: float | None,
+    max_hr: float | None,
+    effort: float | None,
+    duration_min: float | None,
+) -> str | None:
+    """Uses the workout title and available health signals to classify cardio. Returns zone2, hard, unknown, or None when it does not look like cardio."""
     text = (title or "").lower()
     if _contains_any(text, ZONE2_TITLE_KEYWORDS):
         return "zone2"
@@ -190,6 +232,7 @@ def _cardio_zone(title: str | None, avg_hr: float | None, max_hr: float | None,
 
 
 def _month_stats(conn, start: str | None, end: str | None) -> dict:
+    """Builds the training, cardio, muscle, sleep, and recovery stats for one month-sized window. Returns the full stats dict used by the coach screens."""
     stats = {
         "window": (start, end),
         "workouts": 0,
@@ -272,7 +315,9 @@ def _month_stats(conn, start: str | None, end: str | None) -> dict:
         if row["avg_rpe"] is not None:
             rpes.append(row["avg_rpe"])
 
-        zone = _cardio_zone(row["title"], row["avg_hr"], row["max_hr"], row["effort"], duration)
+        zone = _cardio_zone(
+            row["title"], row["avg_hr"], row["max_hr"], row["effort"], duration
+        )
         if zone:
             stats["cardio_min"] += duration
             if zone == "zone2":
@@ -309,7 +354,9 @@ def _month_stats(conn, start: str | None, end: str | None) -> dict:
     for leaf, vol in stats["muscle_volume"].items():
         group, pattern = taxonomy.LEAVES[leaf]
         stats["group_volume"][group] = stats["group_volume"].get(group, 0.0) + vol
-        stats["pattern_volume"][pattern] = stats["pattern_volume"].get(pattern, 0.0) + vol
+        stats["pattern_volume"][pattern] = (
+            stats["pattern_volume"].get(pattern, 0.0) + vol
+        )
 
     stats["avg_effort"] = _avg(efforts)
     stats["avg_rpe"] = _avg(rpes)
@@ -323,6 +370,7 @@ def _month_stats(conn, start: str | None, end: str | None) -> dict:
 
 
 def _readiness(current: dict, previous: dict) -> tuple[str, list[str]]:
+    """Checks the current month against the previous one for recovery and training-load flags. Returns the readiness color and the reasons behind it."""
     flags = []
     sleep = current["sleep_min"]
     if sleep is not None and sleep < 390:
@@ -352,7 +400,11 @@ def _readiness(current: dict, previous: dict) -> tuple[str, list[str]]:
     )
     if current["hard_cardio_min"] >= 60 and recovery_down:
         flags.append("hard cardio is high while recovery is down")
-    elif hard_change is not None and hard_change > 30 and current["hard_cardio_min"] >= 45:
+    elif (
+        hard_change is not None
+        and hard_change > 30
+        and current["hard_cardio_min"] >= 45
+    ):
         flags.append("hard cardio rose sharply")
 
     red_flags = {
@@ -368,6 +420,7 @@ def _readiness(current: dict, previous: dict) -> tuple[str, list[str]]:
 
 
 def _recommendation(priority, area, title, evidence, action, timeframe):
+    """Puts one recommendation into the same shape as the others. Returns a recommendation dict."""
     return {
         "priority": priority,
         "area": area,
@@ -379,6 +432,7 @@ def _recommendation(priority, area, title, evidence, action, timeframe):
 
 
 def _build_recommendations(current: dict, previous: dict, readiness: str) -> list[dict]:
+    """Turns the monthly stats into a short, sorted list of practical recommendations. Returns up to six recommendation dicts."""
     recs = []
     load_change = _pct_change(current["duration_min"], previous["duration_min"])
     zone2_change = _pct_change(current["zone2_min"], previous["zone2_min"])
@@ -387,70 +441,88 @@ def _build_recommendations(current: dict, previous: dict, readiness: str) -> lis
     sleep_change = _pct_change(current["sleep_min"], previous["sleep_min"])
 
     if current["zone2_min"] < 80:
-        recs.append(_recommendation(
-            "high" if readiness == "green" else "medium",
-            "cardio",
-            "Build your aerobic base",
-            f"Zone 2 work is about {current['zone2_min']:.0f} min in the latest 30 days.",
-            "Add 2 Zone 2 sessions per week at 25-35 minutes each.",
-            "Next 4 weeks",
-        ))
+        recs.append(
+            _recommendation(
+                "high" if readiness == "green" else "medium",
+                "cardio",
+                "Build your aerobic base",
+                f"Zone 2 work is about {current['zone2_min']:.0f} min in the latest 30 days.",
+                "Add 2 Zone 2 sessions per week at 25-35 minutes each.",
+                "Next 4 weeks",
+            )
+        )
     elif zone2_change is not None and zone2_change < -20 and readiness != "red":
-        recs.append(_recommendation(
-            "medium",
-            "cardio",
-            "Bring Zone 2 back up",
-            f"Zone 2 minutes are {abs(zone2_change):.0f}% lower than the prior 30 days.",
-            "Add one easy aerobic session weekly before adding more hard intervals.",
-            "Weeks 1-2",
-        ))
+        recs.append(
+            _recommendation(
+                "medium",
+                "cardio",
+                "Bring Zone 2 back up",
+                f"Zone 2 minutes are {abs(zone2_change):.0f}% lower than the prior 30 days.",
+                "Add one easy aerobic session weekly before adding more hard intervals.",
+                "Weeks 1-2",
+            )
+        )
 
     if current["hard_cardio_min"] >= 90 and readiness != "green":
-        recs.append(_recommendation(
-            "high",
-            "cardio",
-            "Cap hard cardio for now",
-            f"Hard cardio is about {current['hard_cardio_min']:.0f} min while readiness is {readiness}.",
-            "Keep intervals to 1 session per week until sleep/HRV/resting HR stabilize.",
-            "Week 1",
-        ))
-    elif hard_change is not None and hard_change > 30 and current["hard_cardio_min"] >= 45:
-        recs.append(_recommendation(
-            "medium",
-            "cardio",
-            "Do not stack more intensity yet",
-            f"Hard cardio is up {hard_change:.0f}% versus the prior 30 days.",
-            "Hold hard cardio steady and add easy Zone 2 if you want more conditioning.",
-            "Weeks 1-2",
-        ))
+        recs.append(
+            _recommendation(
+                "high",
+                "cardio",
+                "Cap hard cardio for now",
+                f"Hard cardio is about {current['hard_cardio_min']:.0f} min while readiness is {readiness}.",
+                "Keep intervals to 1 session per week until sleep/HRV/resting HR stabilize.",
+                "Week 1",
+            )
+        )
+    elif (
+        hard_change is not None
+        and hard_change > 30
+        and current["hard_cardio_min"] >= 45
+    ):
+        recs.append(
+            _recommendation(
+                "medium",
+                "cardio",
+                "Do not stack more intensity yet",
+                f"Hard cardio is up {hard_change:.0f}% versus the prior 30 days.",
+                "Hold hard cardio steady and add easy Zone 2 if you want more conditioning.",
+                "Weeks 1-2",
+            )
+        )
 
     if readiness == "green" and current["strength_sets"] >= 20:
-        recs.append(_recommendation(
-            "high",
-            "strength",
-            "Push lifting volume slightly",
-            f"Readiness is green with {current['strength_sets']} strength sets in the latest 30 days.",
-            "Add 5-10% more work by adding 1 set to a few main lifts, not every lift.",
-            "Weeks 2-4",
-        ))
+        recs.append(
+            _recommendation(
+                "high",
+                "strength",
+                "Push lifting volume slightly",
+                f"Readiness is green with {current['strength_sets']} strength sets in the latest 30 days.",
+                "Add 5-10% more work by adding 1 set to a few main lifts, not every lift.",
+                "Weeks 2-4",
+            )
+        )
     elif load_change is not None and load_change > 25:
-        recs.append(_recommendation(
-            "high",
-            "training load",
-            "Hold total training load",
-            f"Training time is up {load_change:.0f}% versus the prior 30 days.",
-            "Keep next week close to this month's average before adding more volume.",
-            "Week 1",
-        ))
+        recs.append(
+            _recommendation(
+                "high",
+                "training load",
+                "Hold total training load",
+                f"Training time is up {load_change:.0f}% versus the prior 30 days.",
+                "Keep next week close to this month's average before adding more volume.",
+                "Week 1",
+            )
+        )
     elif strength_change is not None and strength_change < -20:
-        recs.append(_recommendation(
-            "medium",
-            "strength",
-            "Rebuild lifting consistency",
-            f"Strength sets are down {abs(strength_change):.0f}% versus the prior 30 days.",
-            "Add one full-body or lower-body session before increasing intensity.",
-            "Weeks 1-2",
-        ))
+        recs.append(
+            _recommendation(
+                "medium",
+                "strength",
+                "Rebuild lifting consistency",
+                f"Strength sets are down {abs(strength_change):.0f}% versus the prior 30 days.",
+                "Add one full-body or lower-body session before increasing intensity.",
+                "Weeks 1-2",
+            )
+        )
 
     mv = current["muscle_volume"]
     gv = current["group_volume"]
@@ -466,116 +538,143 @@ def _build_recommendations(current: dict, previous: dict, readiness: str) -> lis
 
     # chest/back is cleaner here than push/pull. push includes delts + triceps too.
     if chest >= 12 and back < chest * 0.9:
-        recs.append(_recommendation(
-            "medium",
-            "strength balance",
-            "Add back volume",
-            f"Back ({back:.0f} sets) trails chest ({chest:.0f}) this month.",
-            "Add 4-6 sets of rows or pulldowns each week to even chest and back.",
-            "Next 4 weeks",
-        ))
+        recs.append(
+            _recommendation(
+                "medium",
+                "strength balance",
+                "Add back volume",
+                f"Back ({back:.0f} sets) trails chest ({chest:.0f}) this month.",
+                "Add 4-6 sets of rows or pulldowns each week to even chest and back.",
+                "Next 4 weeks",
+            )
+        )
     if biceps + triceps >= 12 and min(biceps, triceps) < max(biceps, triceps) * 0.6:
         lagging = "biceps" if biceps < triceps else "triceps"
-        recs.append(_recommendation(
-            "low",
-            "strength balance",
-            "Even out arm work",
-            f"Biceps {biceps:.0f} vs triceps {triceps:.0f} sets; {lagging} is lagging.",
-            f"Add 3-4 sets of direct {lagging} work each week.",
-            "Next 4 weeks",
-        ))
+        recs.append(
+            _recommendation(
+                "low",
+                "strength balance",
+                "Even out arm work",
+                f"Biceps {biceps:.0f} vs triceps {triceps:.0f} sets; {lagging} is lagging.",
+                f"Add 3-4 sets of direct {lagging} work each week.",
+                "Next 4 weeks",
+            )
+        )
     if quads >= 16 and hams < quads * 0.6:
-        recs.append(_recommendation(
-            "medium",
-            "strength balance",
-            "Balance the posterior chain",
-            f"Hamstrings ({hams:.0f} sets) trail quads ({quads:.0f}) this month.",
-            "Add 3-4 sets each of a hip hinge and a leg curl per week.",
-            "Next 4 weeks",
-        ))
+        recs.append(
+            _recommendation(
+                "medium",
+                "strength balance",
+                "Balance the posterior chain",
+                f"Hamstrings ({hams:.0f} sets) trail quads ({quads:.0f}) this month.",
+                "Add 3-4 sets each of a hip hinge and a leg curl per week.",
+                "Next 4 weeks",
+            )
+        )
     if hams >= 8 and (mv["ham_hinge"] == 0 or mv["ham_curl"] == 0):
-        missing = "hip-hinge (RDL/deadlift)" if mv["ham_hinge"] == 0 else "knee-flexion (leg curl)"
-        recs.append(_recommendation(
-            "low",
-            "strength balance",
-            "Hit both hamstring functions",
-            f"Hamstring work is all one pattern; {missing} is missing.",
-            f"Add 3-4 sets of {missing} weekly so both functions get trained.",
-            "Next 4 weeks",
-        ))
+        missing = (
+            "hip-hinge (RDL/deadlift)"
+            if mv["ham_hinge"] == 0
+            else "knee-flexion (leg curl)"
+        )
+        recs.append(
+            _recommendation(
+                "low",
+                "strength balance",
+                "Hit both hamstring functions",
+                f"Hamstring work is all one pattern; {missing} is missing.",
+                f"Add 3-4 sets of {missing} weekly so both functions get trained.",
+                "Next 4 weeks",
+            )
+        )
     if delts_fs >= 12 and mv["rear_delts"] < delts_fs * 0.3:
-        recs.append(_recommendation(
-            "medium",
-            "strength balance",
-            "Bring up rear delts",
-            f"Rear delts ({mv['rear_delts']:.0f} sets) lag front/side ({delts_fs:.0f}).",
-            "Add 4-6 sets of face pulls or reverse flys each week.",
-            "Next 4 weeks",
-        ))
+        recs.append(
+            _recommendation(
+                "medium",
+                "strength balance",
+                "Bring up rear delts",
+                f"Rear delts ({mv['rear_delts']:.0f} sets) lag front/side ({delts_fs:.0f}).",
+                "Add 4-6 sets of face pulls or reverse flys each week.",
+                "Next 4 weeks",
+            )
+        )
     if upper >= 24 and glutes < 6:
-        recs.append(_recommendation(
-            "low",
-            "strength balance",
-            "Add direct glute work",
-            f"Glute volume is {glutes:.0f} sets while upper body sits at {upper:.0f}.",
-            "Add one hip thrust or glute-focused session each week.",
-            "Next 4 weeks",
-        ))
+        recs.append(
+            _recommendation(
+                "low",
+                "strength balance",
+                "Add direct glute work",
+                f"Glute volume is {glutes:.0f} sets while upper body sits at {upper:.0f}.",
+                "Add one hip thrust or glute-focused session each week.",
+                "Next 4 weeks",
+            )
+        )
 
     if current["sleep_min"] is not None and current["sleep_min"] < 420:
-        recs.append(_recommendation(
-            "high" if readiness == "red" else "medium",
-            "recovery",
-            "Raise the sleep floor",
-            f"Average sleep is {current['sleep_min'] / 60.0:.1f}h over the latest 30 days.",
-            "Protect a 7h sleep opportunity on the nights before harder sessions.",
-            "Next 2 weeks",
-        ))
+        recs.append(
+            _recommendation(
+                "high" if readiness == "red" else "medium",
+                "recovery",
+                "Raise the sleep floor",
+                f"Average sleep is {current['sleep_min'] / 60.0:.1f}h over the latest 30 days.",
+                "Protect a 7h sleep opportunity on the nights before harder sessions.",
+                "Next 2 weeks",
+            )
+        )
     elif sleep_change is not None and sleep_change < -5:
-        recs.append(_recommendation(
-            "medium",
-            "recovery",
-            "Stop the sleep slide",
-            f"Sleep is down {abs(sleep_change):.0f}% versus the prior 30 days.",
-            "Keep hard workouts away from short-sleep days when possible.",
-            "Weeks 1-2",
-        ))
+        recs.append(
+            _recommendation(
+                "medium",
+                "recovery",
+                "Stop the sleep slide",
+                f"Sleep is down {abs(sleep_change):.0f}% versus the prior 30 days.",
+                "Keep hard workouts away from short-sleep days when possible.",
+                "Weeks 1-2",
+            )
+        )
 
     if not recs:
-        recs.append(_recommendation(
-            "medium",
-            "training",
-            "Keep progressing gradually",
-            "The latest 30 days look stable against the prior month.",
-            "Add one small progression at a time: either 5-10% lifting volume or one easy aerobic session.",
-            "Next 4 weeks",
-        ))
+        recs.append(
+            _recommendation(
+                "medium",
+                "training",
+                "Keep progressing gradually",
+                "The latest 30 days look stable against the prior month.",
+                "Add one small progression at a time: either 5-10% lifting volume or one easy aerobic session.",
+                "Next 4 weeks",
+            )
+        )
 
     existing_titles = {r["title"] for r in recs}
     if "Keep hard days separated" not in existing_titles:
-        recs.append(_recommendation(
-            "low",
-            "recovery",
-            "Keep hard days separated",
-            f"Hard cardio is about {current['hard_cardio_min']:.0f} min in the latest 30 days.",
-            "Leave at least one easy or rest day between intervals and your hardest lifting sessions.",
-            "Next 4 weeks",
-        ))
+        recs.append(
+            _recommendation(
+                "low",
+                "recovery",
+                "Keep hard days separated",
+                f"Hard cardio is about {current['hard_cardio_min']:.0f} min in the latest 30 days.",
+                "Leave at least one easy or rest day between intervals and your hardest lifting sessions.",
+                "Next 4 weeks",
+            )
+        )
     if "Review the next monthly export" not in existing_titles:
-        recs.append(_recommendation(
-            "low",
-            "tracking",
-            "Review the next monthly export",
-            "These recommendations are based on the latest 30 days versus the prior 30 days.",
-            "After your next upload, compare whether Zone 2, strength sets, sleep, HRV, and resting HR moved the right way.",
-            "Next upload",
-        ))
+        recs.append(
+            _recommendation(
+                "low",
+                "tracking",
+                "Review the next monthly export",
+                "These recommendations are based on the latest 30 days versus the prior 30 days.",
+                "After your next upload, compare whether Zone 2, strength sets, sleep, HRV, and resting HR moved the right way.",
+                "Next upload",
+            )
+        )
 
     recs.sort(key=lambda r: (PRIORITY_ORDER[r["priority"]], r["area"], r["title"]))
     return recs[:6]
 
 
 def _monthly_plan(current: dict, readiness: str) -> list[dict]:
+    """Turns the current workload and readiness into a simple four-week plan. Returns four weekly plan dicts."""
     weekly_lifts = max(2, round(current["workouts"] / 4))
     weekly_zone2 = max(50, round(current["zone2_min"] / 4))
     weekly_hard = round(current["hard_cardio_min"] / 4)
@@ -603,21 +702,45 @@ def _monthly_plan(current: dict, readiness: str) -> list[dict]:
         set_target = f"{round(weekly_sets * 0.8)}-{weekly_sets} strength sets"
         zone2_target = f"about {weekly_zone2} easy Zone 2 min"
 
-    hard_target = "0-1 hard cardio sessions" if weekly_hard < 30 or readiness != "green" else "1 hard cardio session"
+    hard_target = (
+        "0-1 hard cardio sessions"
+        if weekly_hard < 30 or readiness != "green"
+        else "1 hard cardio session"
+    )
     return [
-        {"week": "Week 1", "lifting": set_target, "cardio": zone2_target,
-         "recovery": hard_target, "progression": week1},
-        {"week": "Week 2", "lifting": set_target, "cardio": zone2_target,
-         "recovery": hard_target, "progression": week2},
-        {"week": "Week 3", "lifting": set_target, "cardio": zone2_target,
-         "recovery": hard_target, "progression": week3},
-        {"week": "Week 4", "lifting": set_target, "cardio": zone2_target,
-         "recovery": hard_target, "progression": week4},
+        {
+            "week": "Week 1",
+            "lifting": set_target,
+            "cardio": zone2_target,
+            "recovery": hard_target,
+            "progression": week1,
+        },
+        {
+            "week": "Week 2",
+            "lifting": set_target,
+            "cardio": zone2_target,
+            "recovery": hard_target,
+            "progression": week2,
+        },
+        {
+            "week": "Week 3",
+            "lifting": set_target,
+            "cardio": zone2_target,
+            "recovery": hard_target,
+            "progression": week3,
+        },
+        {
+            "week": "Week 4",
+            "lifting": set_target,
+            "cardio": zone2_target,
+            "recovery": hard_target,
+            "progression": week4,
+        },
     ]
 
 
 def coach_recommendations(db_path: str) -> dict:
-    """Next-month recommendations from the latest monthly window."""
+    """Builds next-month recommendations from the latest and previous 30-day windows. Returns the readiness data, recommendations, and monthly plan in one dict."""
     conn = db.connect(db_path)
     try:
         end = _latest_data_date(conn)
@@ -656,7 +779,7 @@ def coach_recommendations(db_path: str) -> dict:
 
 
 def movement_balance(db_path: str) -> dict:
-    """Muscle-group volume breakdown for the latest 30 days."""
+    """Breaks down muscle-group and movement-pattern volume for the latest 30 days. Returns the volume, classification, chest/back, and quad/hamstring data in one dict."""
     conn = db.connect(db_path)
     try:
         end = _latest_data_date(conn)
@@ -674,10 +797,14 @@ def movement_balance(db_path: str) -> dict:
         "patterns": stats["pattern_volume"],
         "muscles": stats["muscle_volume"],
         "iso_volume": stats["iso_volume"],
-        "chest_back": (stats["group_volume"].get("chest", 0.0),
-                       stats["group_volume"].get("back", 0.0)),
-        "quad_ham": (stats["group_volume"].get("quads", 0.0),
-                     stats["group_volume"].get("hamstrings", 0.0)),
+        "chest_back": (
+            stats["group_volume"].get("chest", 0.0),
+            stats["group_volume"].get("back", 0.0),
+        ),
+        "quad_ham": (
+            stats["group_volume"].get("quads", 0.0),
+            stats["group_volume"].get("hamstrings", 0.0),
+        ),
         "strength_sets": strength,
         "classified_pct": (100.0 * classified / strength) if strength else None,
         "unmapped": stats["unmapped"],
@@ -685,7 +812,7 @@ def movement_balance(db_path: str) -> dict:
 
 
 def status(db_path: str) -> dict:
-    """Counts and date coverage."""
+    """Checks how much data is in each table and what date ranges it covers. Returns the table counts, coverage ranges, common metrics, and import metadata in one dict."""
     conn = db.connect(db_path)
     try:
         tables = {}
@@ -697,22 +824,26 @@ def status(db_path: str) -> dict:
             "daily_sleep",
             "apple_workouts",
         ):
-            tables[table] = conn.execute(f"SELECT COUNT(*) c FROM {table}").fetchone()["c"]
+            tables[table] = conn.execute(f"SELECT COUNT(*) c FROM {table}").fetchone()[
+                "c"
+            ]
 
         rng = conn.execute(
             "SELECT MIN(start_local) lo, MAX(start_local) hi FROM workouts"
         ).fetchone()
-        daily_rng = conn.execute("SELECT MIN(date) lo, MAX(date) hi FROM daily_health").fetchone()
-        sleep_rng = conn.execute("SELECT MIN(date) lo, MAX(date) hi FROM daily_sleep").fetchone()
-        metrics = conn.execute(
-            """
+        daily_rng = conn.execute(
+            "SELECT MIN(date) lo, MAX(date) hi FROM daily_health"
+        ).fetchone()
+        sleep_rng = conn.execute(
+            "SELECT MIN(date) lo, MAX(date) hi FROM daily_sleep"
+        ).fetchone()
+        metrics = conn.execute("""
             SELECT metric_type, COUNT(*) c
             FROM daily_health
             GROUP BY metric_type
             ORDER BY c DESC, metric_type
             LIMIT 12
-            """
-        ).fetchall()
+            """).fetchall()
         meta_rows = conn.execute("SELECT key, value FROM import_meta").fetchall()
         return {
             "tables": tables,
@@ -727,7 +858,7 @@ def status(db_path: str) -> dict:
 
 
 def recent_workouts(db_path: str, limit: int = 10) -> list[dict]:
-    """Recent workouts, plus the useful rollups."""
+    """Loads the most recent workouts with their useful set and health rollups. Returns a list of workout dicts, newest first."""
     conn = db.connect(db_path)
     try:
         rows = conn.execute(
@@ -780,11 +911,10 @@ def recent_workouts(db_path: str, limit: int = 10) -> list[dict]:
 
 
 def weekly_summary(db_path: str, weeks: int = 8) -> list[dict]:
-    """Week buckets for training load."""
+    """Groups workouts into Monday-starting buckets for training-load trends. Returns up to the requested number of weekly summary dicts."""
     conn = db.connect(db_path)
     try:
-        rows = conn.execute(
-            """
+        rows = conn.execute("""
             WITH set_rollup AS (
                 SELECT
                     workout_id,
@@ -817,18 +947,19 @@ def weekly_summary(db_path: str, weeks: int = 8) -> list[dict]:
             LEFT JOIN set_rollup sr ON sr.workout_id = w.workout_id
             LEFT JOIN metric_rollup mr ON mr.workout_id = w.workout_id
             ORDER BY w.start_utc DESC
-            """
-        ).fetchall()
+            """).fetchall()
 
-        buckets = defaultdict(lambda: {
-            "week_start": None,
-            "workouts": 0,
-            "duration_min": 0.0,
-            "sets": 0,
-            "volume_lbs": 0.0,
-            "hr_values": [],
-            "effort_values": [],
-        })
+        buckets = defaultdict(
+            lambda: {
+                "week_start": None,
+                "workouts": 0,
+                "duration_min": 0.0,
+                "sets": 0,
+                "volume_lbs": 0.0,
+                "hr_values": [],
+                "effort_values": [],
+            }
+        )
         for row in rows:
             d = date.fromisoformat(row["day"])
             week_start = d - timedelta(days=d.weekday())
@@ -856,17 +987,13 @@ def weekly_summary(db_path: str, weeks: int = 8) -> list[dict]:
 
 
 def recovery_summary(db_path: str) -> dict:
-    """7/30/60/90 day recovery windows."""
+    """Compares recovery metrics across the 7, 30, 60, and 90-day windows. Returns the windows, sleep stats, metrics, and percent changes in one dict."""
     conn = db.connect(db_path)
     try:
         end = _latest_data_date(conn)
-        windows = {
-            days: _date_range(end, days)
-            for days in (7, 30, 60, 90)
-        }
+        windows = {days: _date_range(end, days) for days in (7, 30, 60, 90)}
         previous_windows = {
-            days: _previous_range(window)
-            for days, window in windows.items()
+            days: _previous_range(window) for days, window in windows.items()
         }
         metrics = {}
         for metric in (
@@ -879,30 +1006,44 @@ def recovery_summary(db_path: str) -> dict:
         ):
             metrics[metric] = {}
             for days, (start, end_s) in windows.items():
-                metrics[metric][f"avg_{days}"] = _daily_metric_avg(conn, metric, start, end_s)
+                metrics[metric][f"avg_{days}"] = _daily_metric_avg(
+                    conn, metric, start, end_s
+                )
                 prev_start, prev_end = previous_windows[days]
                 metrics[metric][f"prev_avg_{days}"] = _daily_metric_avg(
-                    conn, metric, prev_start, prev_end)
+                    conn, metric, prev_start, prev_end
+                )
                 metrics[metric][f"change_{days}_pct"] = _pct_change(
-                    metrics[metric][f"avg_{days}"],
-                    metrics[metric][f"prev_avg_{days}"])
+                    metrics[metric][f"avg_{days}"], metrics[metric][f"prev_avg_{days}"]
+                )
             metrics[metric]["change_pct"] = _pct_change(
-                metrics[metric]["avg_7"], metrics[metric]["avg_30"])
+                metrics[metric]["avg_7"], metrics[metric]["avg_30"]
+            )
 
         sleep = {}
         for days, (start, end_s) in windows.items():
-            sleep[f"asleep_min_{days}"] = _sleep_avg(conn, "asleep_total_min", start, end_s)
-            sleep[f"efficiency_{days}"] = _sleep_avg(conn, "efficiency_pct", start, end_s)
+            sleep[f"asleep_min_{days}"] = _sleep_avg(
+                conn, "asleep_total_min", start, end_s
+            )
+            sleep[f"efficiency_{days}"] = _sleep_avg(
+                conn, "efficiency_pct", start, end_s
+            )
             prev_start, prev_end = previous_windows[days]
             sleep[f"prev_asleep_min_{days}"] = _sleep_avg(
-                conn, "asleep_total_min", prev_start, prev_end)
+                conn, "asleep_total_min", prev_start, prev_end
+            )
             sleep[f"prev_efficiency_{days}"] = _sleep_avg(
-                conn, "efficiency_pct", prev_start, prev_end)
+                conn, "efficiency_pct", prev_start, prev_end
+            )
             sleep[f"asleep_change_{days}_pct"] = _pct_change(
-                sleep[f"asleep_min_{days}"], sleep[f"prev_asleep_min_{days}"])
+                sleep[f"asleep_min_{days}"], sleep[f"prev_asleep_min_{days}"]
+            )
             sleep[f"efficiency_change_{days}_pct"] = _pct_change(
-                sleep[f"efficiency_{days}"], sleep[f"prev_efficiency_{days}"])
-        sleep["asleep_change_pct"] = _pct_change(sleep["asleep_min_7"], sleep["asleep_min_30"])
+                sleep[f"efficiency_{days}"], sleep[f"prev_efficiency_{days}"]
+            )
+        sleep["asleep_change_pct"] = _pct_change(
+            sleep["asleep_min_7"], sleep["asleep_min_30"]
+        )
 
         return {
             "latest_date": end.isoformat() if end else None,
@@ -920,13 +1061,21 @@ def recovery_summary(db_path: str) -> dict:
 
 
 def coach_insights(db_path: str) -> dict:
-    """Main coach snapshot."""
+    """Builds the main coach snapshot from recent training and recovery data. Returns the current and previous workload, recovery summary, recent workout, weekly data, and plain-English notes."""
     conn = db.connect(db_path)
     try:
         end = _latest_data_date(conn)
         start_7, end_s = _date_range(end, 7)
-        prev_end = (date.fromisoformat(start_7) - timedelta(days=1)).isoformat() if start_7 else None
-        prev_start = (date.fromisoformat(prev_end) - timedelta(days=6)).isoformat() if prev_end else None
+        prev_end = (
+            (date.fromisoformat(start_7) - timedelta(days=1)).isoformat()
+            if start_7
+            else None
+        )
+        prev_start = (
+            (date.fromisoformat(prev_end) - timedelta(days=6)).isoformat()
+            if prev_end
+            else None
+        )
         current = _workout_totals(conn, start_7, end_s)
         previous = _workout_totals(conn, prev_start, prev_end)
     finally:
@@ -944,7 +1093,9 @@ def coach_insights(db_path: str) -> dict:
     if current["count"] == 0:
         notes.append("No workouts are logged in the latest 7-day window.")
     elif previous["count"] == 0:
-        notes.append(f"Latest 7 days include {current['count']} workouts and {current['duration_min']:.0f} training minutes.")
+        notes.append(
+            f"Latest 7 days include {current['count']} workouts and {current['duration_min']:.0f} training minutes."
+        )
     else:
         delta = current["duration_min"] - previous["duration_min"]
         direction = "up" if delta >= 0 else "down"
@@ -955,18 +1106,36 @@ def coach_insights(db_path: str) -> dict:
     if sleep["asleep_min_7"] is not None:
         sleep_hours = sleep["asleep_min_7"] / 60.0
         if sleep_hours < 6.5:
-            notes.append(f"Average sleep is {sleep_hours:.1f} hours over the latest 7 days; recovery may be constrained.")
+            notes.append(
+                f"Average sleep is {sleep_hours:.1f} hours over the latest 7 days; recovery may be constrained."
+            )
         elif sleep_hours >= 7.5:
-            notes.append(f"Average sleep is {sleep_hours:.1f} hours over the latest 7 days, which supports harder training.")
+            notes.append(
+                f"Average sleep is {sleep_hours:.1f} hours over the latest 7 days, which supports harder training."
+            )
 
-    if hrv["avg_7"] is not None and hrv["avg_30"] is not None and hrv["avg_7"] < hrv["avg_30"] * 0.9:
-        notes.append("HRV is more than 10% below the 30-day average, so keep an eye on fatigue.")
+    if (
+        hrv["avg_7"] is not None
+        and hrv["avg_30"] is not None
+        and hrv["avg_7"] < hrv["avg_30"] * 0.9
+    ):
+        notes.append(
+            "HRV is more than 10% below the 30-day average, so keep an eye on fatigue."
+        )
 
-    if rhr["avg_7"] is not None and rhr["avg_30"] is not None and rhr["avg_7"] > rhr["avg_30"] * 1.05:
-        notes.append("Resting heart rate is elevated versus the 30-day average; consider keeping the next session moderate.")
+    if (
+        rhr["avg_7"] is not None
+        and rhr["avg_30"] is not None
+        and rhr["avg_7"] > rhr["avg_30"] * 1.05
+    ):
+        notes.append(
+            "Resting heart rate is elevated versus the 30-day average; consider keeping the next session moderate."
+        )
 
     if not notes:
-        notes.append("Training and recovery look steady from the data currently available.")
+        notes.append(
+            "Training and recovery look steady from the data currently available."
+        )
 
     return {
         "latest_date": recovery["latest_date"],

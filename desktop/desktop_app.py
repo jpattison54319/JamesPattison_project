@@ -16,6 +16,7 @@ class DashboardApp(ctk.CTk):
     """Main window for the dashboard and import screens."""
 
     def __init__(self, db_path: Path):
+        """Builds the main window and chooses the right first screen. Returns None."""
         super().__init__()
         self.db_path = Path(db_path)
         self.main_view = None
@@ -30,6 +31,7 @@ class DashboardApp(ctk.CTk):
         self._show_start_view()
 
     def _build_shell(self):
+        """Builds the sidebar and main content area used by both app flows. Returns None."""
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
 
@@ -60,24 +62,11 @@ class DashboardApp(ctk.CTk):
             anchor="w",
         ).pack(anchor="w", pady=(4, 0))
 
-        ctk.CTkLabel(
-            sidebar,
-            text="OVERVIEW",
-            text_color=COLORS["muted"],
-            font=ctk.CTkFont(size=10, weight="bold"),
-            anchor="w",
-        ).grid(row=1, column=0, sticky="ew", padx=24, pady=(0, 10))
-
-        active = ctk.CTkFrame(sidebar, fg_color=COLORS["accent_dark"], corner_radius=9)
-        active.grid(row=2, column=0, sticky="ew", padx=14)
-        self.active_section = ctk.CTkLabel(
-            active,
-            text="  Dashboard",
-            text_color=COLORS["text"],
-            font=ctk.CTkFont(size=13, weight="bold"),
-            anchor="w",
+        self.sidebar_buttons = {}
+        self._add_sidebar_button(
+            sidebar, "dashboard", "Dashboard", 1, self.show_dashboard
         )
-        self.active_section.pack(fill="x", padx=10, pady=9)
+        self._add_sidebar_button(sidebar, "upload", "Upload", 2, self.show_import)
 
         self.sidebar_status = ctk.CTkLabel(
             sidebar,
@@ -88,7 +77,7 @@ class DashboardApp(ctk.CTk):
             anchor="sw",
             wraplength=170,
         )
-        self.sidebar_status.grid(row=3, column=0, sticky="sw", padx=24, pady=(0, 28))
+        self.sidebar_status.grid(row=3, column=0, sticky="sw", padx=24, pady=(22, 28))
 
         self.sidebar_help = ctk.CTkLabel(
             sidebar,
@@ -101,48 +90,81 @@ class DashboardApp(ctk.CTk):
         self.sidebar_help.grid(row=5, column=0, sticky="sw", padx=24, pady=(0, 28))
 
         self.main_area = ctk.CTkFrame(self, fg_color="transparent")
-        self.main_area.grid(row=0, column=1, sticky="nsew", padx=(28, 34), pady=(26, 28))
+        self.main_area.grid(
+            row=0, column=1, sticky="nsew", padx=(28, 34), pady=(26, 28)
+        )
         self.main_area.grid_rowconfigure(0, weight=1)
         self.main_area.grid_columnconfigure(0, weight=1)
 
     def _show_start_view(self):
-        if engine.db_snapshot(str(self.db_path)):
-            self.show_dashboard()
-        else:
-            self.show_onboarding()
+        """Start on the dashboard. It handles its own empty state."""
+        self.show_dashboard()
+
+    def _add_sidebar_button(self, parent, key, label, row, command):
+        """Add one sidebar button."""
+        button = ctk.CTkButton(
+            parent,
+            text=f"  {label}",
+            height=38,
+            corner_radius=9,
+            fg_color="transparent",
+            hover_color=COLORS["card_border"],
+            text_color=COLORS["muted"],
+            font=ctk.CTkFont(size=13, weight="bold"),
+            anchor="w",
+            command=command,
+        )
+        button.grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 4))
+        self.sidebar_buttons[key] = button
+
+    def _set_active_section(self, key):
+        """Highlight the selected sidebar button."""
+        for section, button in self.sidebar_buttons.items():
+            active = section == key
+            button.configure(
+                fg_color=COLORS["accent_dark"] if active else "transparent",
+                text_color=COLORS["text"] if active else COLORS["muted"],
+            )
+
+    def _set_navigation_enabled(self, enabled: bool):
+        """Keep navigation still while an upload is running."""
+        state = "normal" if enabled else "disabled"
+        for button in self.sidebar_buttons.values():
+            button.configure(state=state)
 
     def _clear_main_view(self):
+        """Removes the currently displayed main view if there is one. Returns None."""
         if self.main_view is not None:
             self.main_view.destroy()
         self.main_view = None
 
-    def show_onboarding(self):
-        self._show_import_view(existing_user=False)
-
     def show_import(self):
+        """Show the upload screen for a first or later export pair."""
         snapshot = engine.db_snapshot(str(self.db_path)) or {}
         self._show_import_view(
-            existing_user=True,
+            existing_user=bool(snapshot),
             default_timezone=snapshot.get("tz_name"),
         )
 
-    def _show_import_view(self, existing_user: bool, default_timezone: str | None = None):
+    def _show_import_view(
+        self, existing_user: bool, default_timezone: str | None = None
+    ):
+        """Show the right upload version for this user."""
         self._clear_main_view()
+        self._set_active_section("upload")
         if existing_user:
-            self.active_section.configure(text="  Import Data")
-            self.sidebar_status.configure(text="Ready to reconcile new exports")
+            self.sidebar_status.configure(text="Ready to reconcile new uploads")
             self.sidebar_help.configure(
                 text=(
-                    "Import workflow\n\nChoose the newest Apple Health\n"
+                    "Upload workflow\n\nChoose the newest Apple Health\n"
                     "XML and Hevy CSV exports.\n\nExisting data stays local."
                 )
             )
         else:
-            self.active_section.configure(text="  Setup")
-            self.sidebar_status.configure(text="Ready for your first import")
+            self.sidebar_status.configure(text="Ready for your first upload")
             self.sidebar_help.configure(
                 text=(
-                    "Import workflow\n\nSelect your Apple Health\n"
+                    "Upload workflow\n\nSelect your Apple Health\n"
                     "XML export and Hevy CSV.\n\nYour data stays local."
                 )
             )
@@ -153,16 +175,25 @@ class DashboardApp(ctk.CTk):
             existing_user=existing_user,
             default_timezone=default_timezone,
             on_cancel=self.show_dashboard if existing_user else None,
+            on_view_dashboard=self.show_dashboard,
+            on_upload_again=self.show_import,
+            on_import_state_changed=self._set_navigation_enabled,
         )
         self.main_view.grid(row=0, column=0, sticky="nsew")
 
     def show_dashboard(self):
+        """Builds and displays the monthly coaching dashboard. Returns None."""
         self._clear_main_view()
-        self.active_section.configure(text="  Dashboard")
+        self._set_active_section("dashboard")
+        snapshot = engine.db_snapshot(str(self.db_path))
+        if snapshot:
+            self._update_sidebar_from_snapshot()
+        else:
+            self.sidebar_status.configure(text="No imported data yet")
         self.sidebar_help.configure(
             text=(
-                "Import workflow\n\nFor later exports, click\n"
-                "Import new data above.\n\nThe CLI is also available:\n"
+                "Upload workflow\n\nUse Upload to add your newest\n"
+                "Apple Health and Hevy exports.\n\nThe CLI is also available:\n"
                 "python fitlens.py"
             )
         )
@@ -175,15 +206,19 @@ class DashboardApp(ctk.CTk):
         self.main_view.grid(row=0, column=0, sticky="nsew")
 
     def _onboarding_complete(self, report):
-        self.show_dashboard()
-        self.main_view.set_status(
-            f"Import complete — {report.new_workouts:,} workouts, "
-            f"{report.new_sets:,} sets, and "
-            f"{report.sleep_nights_written:,} sleep nights saved."
-        )
+        """Refresh the sidebar while the upload confirmation stays on screen."""
+        self._update_sidebar_from_snapshot()
+
+    def _update_sidebar_from_snapshot(self):
+        """Refresh sidebar totals without rebuilding the dashboard."""
+        self._set_sidebar_status(engine.db_snapshot(str(self.db_path)))
 
     def _update_sidebar(self, data):
-        snapshot = data.database
+        """Update sidebar totals after the dashboard loads."""
+        self._set_sidebar_status(data.database)
+
+    def _set_sidebar_status(self, snapshot):
+        """Show the current import totals in the sidebar."""
         if not snapshot:
             self.sidebar_status.configure(text="No imported data yet")
             return

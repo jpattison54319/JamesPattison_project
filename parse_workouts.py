@@ -10,13 +10,13 @@ CSV_TIME_FMT = "%b %d, %Y, %I:%M %p"
 
 
 def _localize(text: str, tz: ZoneInfo) -> datetime:
-    """Hevy times need the timezone added."""
+    """Parses a Hevy timestamp and adds the selected timezone. Returns the timezone-aware datetime."""
     naive = datetime.strptime(text.strip(), CSV_TIME_FMT)
     return naive.replace(tzinfo=tz)
 
 
 def parse_workouts(csv_path: str, tz_name: str):
-    """Return workouts and sets ready for the DB."""
+    """Reads the Hevy CSV and turns it into database-ready workouts and sets. Returns a list of workout dicts and a list of set dicts."""
     tz = ZoneInfo(tz_name)
     workouts: dict[str, dict] = {}
     sets: list[dict] = []
@@ -38,23 +38,27 @@ def parse_workouts(csv_path: str, tz_name: str):
                     "start_utc": start_dt.timestamp(),
                     "end_utc": end_dt.timestamp(),
                     "tz_name": tz_name,
-                    "utc_offset_min": int(offset.total_seconds() // 60) if offset else None,
+                    "utc_offset_min": (
+                        int(offset.total_seconds() // 60) if offset else None
+                    ),
                     "duration_sec": (end_dt - start_dt).total_seconds(),
                     "source": "hevy",
                 }
 
-            sets.append({
-                "workout_id": wid,
-                "exercise_title": row.get("exercise_title") or None,
-                "superset_id": row.get("superset_id") or None,
-                "exercise_notes": row.get("exercise_notes") or None,
-                "set_index": to_int(row.get("set_index")),
-                "set_type": row.get("set_type") or None,
-                "weight_lbs": to_float(row.get("weight_lbs")),
-                "reps": to_float(row.get("reps")),
-                "distance_miles": to_float(row.get("distance_miles")),
-                "duration_seconds": to_float(row.get("duration_seconds")),
-                "rpe": to_float(row.get("rpe")),
-            })
+            sets.append(
+                {
+                    "workout_id": wid,
+                    "exercise_title": row.get("exercise_title") or None,
+                    "superset_id": row.get("superset_id") or None,
+                    "exercise_notes": row.get("exercise_notes") or None,
+                    "set_index": to_int(row.get("set_index")),
+                    "set_type": row.get("set_type") or None,
+                    "weight_lbs": to_float(row.get("weight_lbs")),
+                    "reps": to_float(row.get("reps")),
+                    "distance_miles": to_float(row.get("distance_miles")),
+                    "duration_seconds": to_float(row.get("duration_seconds")),
+                    "rpe": to_float(row.get("rpe")),
+                }
+            )
 
     return list(workouts.values()), sets
