@@ -10,7 +10,7 @@ Files:
 Run FitLens from the repo root:
 
 ```bash
-.venv/bin/python fitlens.py
+.venv/bin/python fitlens-cli.py
 ```
 
 When prompted:

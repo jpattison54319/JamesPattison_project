@@ -753,7 +753,7 @@ def main():
     try:
         if len(sys.argv) > 1:
             panel(
-                "FitLens is guided now. Run [bold]python fitlens.py[/bold] "
+                "FitLens is guided now. Run [bold]python fitlens-cli.py[/bold] "
                 "without command-line options to use the coach menu.",
                 title="Guided Mode",
                 style="yellow",

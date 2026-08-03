@@ -194,7 +194,7 @@ class DashboardApp(ctk.CTk):
             text=(
                 "Upload workflow\n\nUse Upload to add your newest\n"
                 "Apple Health and Hevy exports.\n\nThe CLI is also available:\n"
-                "python fitlens.py"
+                "python fitlens-cli.py"
             )
         )
         self.main_view = DashboardView(
