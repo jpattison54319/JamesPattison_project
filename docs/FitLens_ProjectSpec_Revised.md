@@ -44,7 +44,7 @@ Revision Date: July 4, 2026
 **Original idea:** The user would run a command like:
 
 ```bash
-python fitlens.py import --apple export.xml --hevy workouts.csv
+python fitlens-cli.py import --apple export.xml --hevy workouts.csv
 ```
 
 or eventually use a desktop GUI to select files.
@@ -52,7 +52,7 @@ or eventually use a desktop GUI to select files.
 **[REVISED]** The current app uses a guided CLI instead of subcommands. The user runs:
 
 ```bash
-python fitlens.py
+python fitlens-cli.py
 ```
 
 If there is no existing `fitlens.db`, FitLens starts onboarding. It asks the user to choose their Apple Health XML export, choose their Hevy workout CSV, confirm the timezone, and pick how much history to import. If a database already exists, the app opens the main menu and lets the user choose **Import new data** when they have fresh exports.
@@ -126,7 +126,7 @@ The app still needs to handle:
 **Original idea:** The user would run:
 
 ```bash
-python fitlens.py report --month 2026-06
+python fitlens-cli.py report --month 2026-06
 ```
 
 and receive a monthly report.
@@ -225,17 +225,17 @@ The import pipeline uses a small overlap window so recent health and sleep data 
 **Original Version 1 CLI Flow**
 
 ```bash
-python fitlens.py import --apple export.xml --hevy workouts.csv
-python fitlens.py report --month 2026-06
-python fitlens.py compare --month 2026-06 --against previous
-python fitlens.py charts --last 90 --output charts/
-python fitlens.py status
+python fitlens-cli.py import --apple export.xml --hevy workouts.csv
+python fitlens-cli.py report --month 2026-06
+python fitlens-cli.py compare --month 2026-06 --against previous
+python fitlens-cli.py charts --last 90 --output charts/
+python fitlens-cli.py status
 ```
 
 **[REVISED] Current CLI Flow**
 
 ```bash
-python fitlens.py
+python fitlens-cli.py
 ```
 
 The app is guided now. The user does not need to remember subcommands.
@@ -298,7 +298,7 @@ health_stream.py       parse_workouts.py
      queries + summaries + rules
                  |
                  v
-            fitlens.py
+            fitlens-cli.py
        guided CLI + rich tables
                  |
                  v
@@ -364,7 +364,7 @@ The class ends in early August, so the final version needs to be realistic. The 
 
 Current module responsibilities:
 
-- `fitlens.py`: guided CLI, menu screens, Rich tables, user prompts
+- `fitlens-cli.py`: guided CLI, menu screens, Rich tables, user prompts
 - `engine.py`: import workflow, coverage window logic, repeated import handling
 - `health_stream.py`: Apple Health XML streaming parser
 - `parse_workouts.py`: Hevy CSV parser
